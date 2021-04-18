@@ -16,6 +16,9 @@
 <b>/portfolio</b> - получение портфолио<br>
 <b>/market/orderbook</b> - получение стакана по FIGI<br>
 <b>/orders</b> - получение списка заявок<br>
+<b>/orders/limit-order</b> - выставление лимитной заявки<br>
+<b>/orders/market-order</b> - выставление рыночной заявки<br>
+<b>/orders/cancel</b> - отмена заявок<br>
 <b>/operations</b> - получение списка операций за период<br>
 ## Пример
 <b>Запрос к OpenAPI</b>
