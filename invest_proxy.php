@@ -13,7 +13,8 @@
  * 📌 Обсуждение в Telegram: @TinkoffInvestStatChat
  * 
  * @author allex
- * @version 1.0
+ * @version 1.01
+ * @date 16.04.2021
  * @url https://github.com/allexme/tinkoff-openapi-readonly
  * 
  */
@@ -23,6 +24,12 @@ define('_TINKOFF_API_TOKEN', "");
 
 /* Укажите Token из настроек сервиса */
 define('_SERVICE_API_TOKEN', "");
+
+/* Принимать запросы на выставление заявок?
+ * - в сервисе статистики используется для вывода частично исполненных заявок;
+ * - отмена и выставление заявок через бота.
+ */
+define('_ORDERS_ALLOW', false);
 
 if (_TINKOFF_API_TOKEN == '' || _SERVICE_API_TOKEN == '') {
 	echo 'See code...';exit;
@@ -68,7 +75,7 @@ class TIProxyClient {
             curl_setopt($curl, CURLOPT_POSTFIELDS, $postFields);
         }
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
-        $return = curl_exec($curl); 
+        $return = curl_exec($curl);
         //result
         $httpCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
         if ($httpCode !== 200) {
@@ -97,14 +104,13 @@ class TIProxyClient {
             if (!empty($postFields)) {
                 $logToFile.="postFields: ".print_R($postFields,1)."\n";
             }
-            $logToFile.="return: ".$return."\n";
+            $logToFile.="return: ".$return."\n\n";
             file_put_contents(__DIR__."/".basename(__FILE__,".php").".log", $logToFile, FILE_APPEND);
-            exit;
         }
         curl_close($curl);
         return $return;
     }
-
+    
     /**
      * Get header Authorization
      * */
@@ -156,49 +162,93 @@ class TIProxyClient {
 $client=new TIProxyClient(_TINKOFF_API_TOKEN, _SERVICE_API_TOKEN);
 $action=trim($_GET['action']);
 $method=$_SERVER['REQUEST_METHOD'];
-if ($method!="GET") { //в текущей реализации доступен только метод "GET", что и проверяем.
+if (!in_array($method, array("GET","POST"))) {
     $client->_404();
 }
 //Поехали
 switch ($method.$action) {
-
+    
     /** Функции aналоги в Tinkoff API **/ 
     
     //Список доступных аккаунтов
     case "GET/user/accounts":
-        echo $client->_request("/user/accounts", $method);
+        echo $client->_request($action, $method);
         break;
-
+    
     //Получение баланса счета
     case "GET/portfolio/currencies":
         if (!$client->brokerAccountId) $client->_404();
-        echo $client->_request("/portfolio/currencies", $method, array('brokerAccountId' => $client->brokerAccountId));
+        echo $client->_request($action, $method, array('brokerAccountId' => $client->brokerAccountId));
         break;
-
+    
     //Получение текущего портфолио (список бумаг в портфеле)
     case "GET/portfolio":
         if (!$client->brokerAccountId) $client->_404();
-        echo $client->_request("/portfolio", $method, array('brokerAccountId' => $client->brokerAccountId));
+        echo $client->_request($action, $method, array('brokerAccountId' => $client->brokerAccountId));
         break;
-
+    
     //Получение стакана по FIGI
     case "GET/market/orderbook":
         $figi=trim($_GET['figi']);
         $depth=intval($_GET['depth']);
         if ($depth<1) { $depth=1; }
         if ($depth>20) { $depth=20; }
-        echo $client->_request("/market/orderbook", $method, array(
+        echo $client->_request($action, $method, array(
             'figi' => $figi,
             'depth' => $depth
         ));
         break;
     
+    //Выставление заявки
+    case "POST/orders/limit-order": // лимитной
+    case "POST/orders/market-order": //рыночной
+        if (_ORDERS_ALLOW) {
+            if (empty($_REQUEST) || empty($_REQUEST['figi']) || empty($_REQUEST['brokerAccountId'])) $client->_404();
+            $figi=trim($_REQUEST['figi']);
+            $brokerAccountId=intval($_REQUEST['brokerAccountId']);
+            //req_body
+            $req_body = file_get_contents('php://input');
+            //send
+            echo $client->_request($action, $method, array(
+                'figi' => $figi,
+                'brokerAccountId' => $brokerAccountId 
+            ), $req_body);
+        } else {
+            echo json_encode(array(
+                'trackingId' => -1,
+                'payload' => array(
+                    "message"=>"В настройках <b>TIProxyClient</b> отключена возможность работы с заявками (_ORDERS_ALLOW = false)!",
+                    "code"=>"OrderNotAvailable"
+                ),
+                'status' => 'Error'
+            ));
+        }
+        break;
+    
+    //Отмена заявок
+    case "POST/orders/cancel":
+        if (_ORDERS_ALLOW) {
+            if (empty($_REQUEST) || empty($_REQUEST['orderId'])) $client->_404();
+            $orderId=trim($_REQUEST['orderId']);
+            echo $client->_request($action, $method, array(
+                'orderId' => $orderId 
+            ));
+        } else {
+            echo json_encode(array(
+                'trackingId' => -1,
+                'payload' => array(
+                    "message"=>"В настройках <b>TIProxyClient</b> отключена возможность работы с заявками (_ORDERS_ALLOW = false)!",
+                    "code"=>"OrderNotAvailable"
+                ),
+                'status' => 'Error'
+            ));
+        }
+        break;
+    
     //Получение списка заявок
     case "GET/orders":
-        //Разрешить (true) или запретить (false). В сервисе статистики используется для вывода частично исполненных заявок.
-        $showOrders = true;
-        if ($showOrders) {
-            echo $client->_request("/orders", $method);
+        if (_ORDERS_ALLOW) {
+            echo $client->_request($action, $method);
         } else {
             echo json_encode(array(
                 'trackingId' => -1,
@@ -217,7 +267,7 @@ switch ($method.$action) {
         $toDate = new DateTime($_GET['to']);
         if ($toDate->format("c")!=$_GET['to']) $client->_404();
         $figi=(!empty($_GET['figi']) ? trim($_GET['figi']) : null);
-        $ret=$client->_request("/operations", $method, array(
+        $ret=$client->_request($action, $method, array(
             "brokerAccountId" => $client->brokerAccountId,
             "from" => $fromDate->format("c"),
             "to" => $toDate->format("c"),
