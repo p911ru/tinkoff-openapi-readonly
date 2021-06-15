@@ -13,8 +13,8 @@
  * 📌 Обсуждение в Telegram: @TinkoffInvestStatChat
  * 
  * @author allex
- * @version 1.01
- * @date 16.04.2021
+ * @version 1.02
+ * @date 15.06.2021
  * @url https://github.com/allexme/tinkoff-openapi-readonly
  * 
  */
@@ -276,15 +276,21 @@ switch ($method.$action) {
         //Удалить операции с информацией о комиссии для снижения трафика
         if (isset($_GET['clean_comission'])) {
             $ret=json_decode($ret,true);
-            $needSort=false;
-            foreach ($ret['payload']['operations'] as $k=>$r) {
-                if ($r['operationType']=='BrokerCommission') {
-                    unset($ret['payload']['operations'][$k]);
-                    $needSort=true;
+            if (!empty($ret) && !empty($ret['payload'])) {
+                $needSort=false;
+                if (!isset($ret['payload']['operations'])) {
+                    $ret['payload']['operations']=array();
+                } else {
+                    foreach ($ret['payload']['operations'] as $k=>$r) {
+                        if ($r['operationType']=='BrokerCommission') {
+                            unset($ret['payload']['operations'][$k]);
+                            $needSort=true;
+                        }
+                    }
                 }
-            }
-            if ($needSort) {
-                $ret['payload']['operations']=array_values($ret['payload']['operations']);
+                if ($needSort) {
+                    $ret['payload']['operations']=array_values($ret['payload']['operations']);
+                }
             }
             echo json_encode($ret);
         } else {
